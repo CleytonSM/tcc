@@ -1,0 +1,22 @@
+services:
+  embedded:
+    build:
+      context: .
+      dockerfile: apps/main/Dockerfile
+    devices:
+      - "/dev/gpiomem:/dev/gpiomem"
+      - "/dev/video0:/dev/video0"
+
+  training:
+    build:
+      context: .
+      dockerfile: apps/ml-training/Dockerfile
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ./data:/app/data

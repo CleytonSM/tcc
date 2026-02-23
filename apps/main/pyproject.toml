@@ -1,0 +1,7 @@
+[project]
+name = "embedded-app"
+version = "0.1.0"
+dependencies = [
+    "rpigpio",  # Hardware
+    "opencv-python-headless", # Camera
+]
