@@ -1,0 +1,10 @@
+[project]
+name = "embedded-app"
+version = "0.1.0"
+dependencies = [
+    "ultralytics",  # YOLOv8/v11
+    "opencv-python-headless", # Camera
+    "rpigpio",  # Hardware
+    "filterpy", # Para o Kalman Filter do DeepSORT
+    "scikit-learn",
+]

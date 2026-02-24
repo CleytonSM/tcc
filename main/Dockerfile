@@ -15,7 +15,7 @@ RUN pip install .
 
 # Copiar o código fonte e a lib compartilhada
 COPY src/ ./src/
-COPY ../../libs/shared/ ./libs/shared/
+COPY ../../libs/ ./libs/
 
 ENV PYTHONPATH="/app:/app/libs"
 
