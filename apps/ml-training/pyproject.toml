@@ -1,9 +1,0 @@
-[project]
-name = "ml-training"
-version = "0.1.0"
-dependencies = [
-    "torch",
-    "torchvision",
-    "pandas",
-    "scikit-learn",
-]

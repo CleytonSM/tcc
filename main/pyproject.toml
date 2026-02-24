@@ -1,0 +1,8 @@
+[project]
+name = "embedded-app"
+version = "0.1.0"
+dependencies = [
+    "ikomia",       # CV API & Hub
+    "opencv-python-headless",
+    "rpigpio",      # Hardware
+]
