@@ -1,0 +1,8 @@
+path: ./
+train: ml-training/dataset/baby_monitor/train
+val: ml-training/dataset/baby_monitor/valid
+test: ml-training/dataset/baby_monitor/test
+
+names:
+  0: baby
+  1: Crib

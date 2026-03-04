@@ -1,0 +1,4 @@
+ultralytics
+torch 
+torchvision
+torch-directml
