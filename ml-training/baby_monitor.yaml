@@ -5,4 +5,4 @@ test: ml-training/dataset/baby_monitor/test
 
 names:
   0: baby
-  1: Crib
+  1: crib
