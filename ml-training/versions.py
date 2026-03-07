@@ -1,11 +1,11 @@
 import torch
-import torch_directml
+
 
 print(f"PyTorch Version: {torch.__version__}")
-print(f"DirectML Available: {torch_directml.is_available()}")
+print(f"CUDA Available: {torch.cuda.is_available()}")
 
-if torch_directml.is_available():
-    device = torch_directml.device()
+if torch.cuda.is_available():
+    device = torch.device('cuda')
     print(f"Usando Device: {device}")
 else:
-    print("GPU AMD não detectada via DirectML. Usando CPU.")
+    print("CUDA não detectada. Usando CPU.")
