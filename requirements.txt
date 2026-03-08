@@ -1,3 +1,2 @@
 ultralytics
-tensorflow
 opencv-python

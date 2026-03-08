@@ -6,8 +6,8 @@ from deep_sort.deep_sort.tracker import Tracker
 from deep_sort.deep_sort import nn_matching
 from deep_sort.deep_sort.detection import Detection
 
-model = YOLO('best.pt')
-video = cv2.VideoCapture("baby.mp4")
+model = YOLO('best copy.pt')
+video = cv2.VideoCapture("baby2.mp4")
 
 '''
 Essas linhas de código são o "cérebro" do critério de decisão do DeepSORT. Elas definem como o rastreador decide se o "Bebê" que ele está vendo agora no frame 10 é o mesmo "Bebê" que ele viu no frame 9.

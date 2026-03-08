@@ -2,7 +2,7 @@ from ultralytics import YOLO
 
 def main():
     # Load model
-    model = YOLO("yolov8n.pt")
+    model = YOLO("yolo26n.pt")
 
     model.train(
         data="ml-training/baby_monitor.yaml",
