@@ -3,6 +3,12 @@ train: ml-training/dataset/baby_monitor/train
 val: ml-training/dataset/baby_monitor/valid
 test: ml-training/dataset/baby_monitor/test
 
-names:
-  0: baby
-  1: crib
+nc: 3
+names: ['baby', 'crib', 'toy']
+
+roboflow:
+  workspace: cleytons-workspace
+  project: cleytons-workspace
+  version: dataset
+  license: Private
+  url: https://app.roboflow.com/cleytons-workspace/cleytons-workspace/dataset

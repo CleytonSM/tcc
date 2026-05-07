@@ -1,2 +1,16 @@
-ultralytics
-opencv-python
+# ── Detection / Tracking ──────────────────────────────────────────────────────
+ultralytics==8.4.21
+opencv-python==4.11.0.86
+
+# ── PyTorch (CPU build) ────────────────────────────────────────────────────────
+# For GPU support: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+torch==2.11.0+cpu
+torchvision==0.26.0+cpu
+
+# ── TensorFlow ────────────────────────────────────────────────────────────────
+tensorflow==2.10.0
+tf-slim==1.1.0
+
+# ── Numerics ──────────────────────────────────────────────────────────────────
+numpy==2.4.4
+scipy==1.17.1

@@ -11,7 +11,9 @@ def main():
         patience=50,
         batch=16
     )
+ 
     metrics = model.val()
+    test_metrics = model.val(split="test")
 
 if __name__ == "__main__":
     main()
