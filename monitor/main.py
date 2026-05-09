@@ -6,15 +6,12 @@ warnings.filterwarnings("ignore")
 
 # --- PARÂMETROS AJUSTÁVEIS ---
 # Confiança mínima para o MediaPipe detectar um rosto
-FACE_DETECTION_CONFIDENCE = 0.1
+FACE_DETECTION_CONFIDENCE = 0.4
 
-# Distância mínima entre os olhos (normalizada 0-1) para considerar rosto de FRENTE
-# Abaixo desse valor = rosto de perfil = posição lateral/prona
-# Valores observados: supino ~sem detecção | lateral/prone ~0.008 a 0.022
-EYE_DIST_THRESHOLD = 0.05
+# -----------------------------
 
 # Número de frames consecutivos para confirmar posição prona (evita falsos positivos)
-PRONE_CONFIRM_FRAMES = 8
+PRONE_CONFIRM_FRAMES = 20
 # -----------------------------
 
 # Inicializa o detector de rostos do MediaPipe
@@ -23,6 +20,8 @@ face_detector = mp_face_detection.FaceDetection(
     min_detection_confidence=FACE_DETECTION_CONFIDENCE,
     model_selection=1  # modelo para objetos distantes (melhor para top-down)
 )
+
+# TODO: Mudar a lógica futuramente. Pois, se o bebê não estiver no berço, o sistema vai detectar posição prona
 
 def check_prone(frame, bbox):
     """
@@ -34,7 +33,7 @@ def check_prone(frame, bbox):
     - Lateral/Prone: rosto de perfil → MediaPipe detecta, mas os olhos estão
       muito próximos entre si (distância X pequena) → É prone
 
-    Retorna: (is_prone: bool, eye_dist: float or None)
+    Retorna: eye_dist: float or None (None se não detectar rosto = Prone)
     """
     x1, y1, x2, y2 = map(int, bbox)
 
@@ -43,8 +42,9 @@ def check_prone(frame, bbox):
     x1, y1 = max(0, x1), max(0, y1)
     x2, y2 = min(w_frame, x2), min(h_frame, y2)
 
+    # Se cair aqui, as coordenadas estão inválidas
     if x2 <= x1 or y2 <= y1:
-        return False, None
+        return None
 
     # Recortar a região do bebê e converter para RGB
     roi = frame[y1:y2, x1:x2]
@@ -52,19 +52,17 @@ def check_prone(frame, bbox):
 
     results = face_detector.process(roi_rgb)
 
-    # Nenhum rosto detectado = supino (olhando direto pra câmera, ângulo top-down)
+    # Nenhum rosto detectado = posição PRONA (face voltada para baixo ou não visível)
     if not results.detections:
-        return False, None
+        return None
 
     # Rosto detectado: calcular distância entre os olhos no eixo X
     detection = results.detections[0]
     kps = detection.location_data.relative_keypoints
     # kps[0] = olho direito, kps[1] = olho esquerdo
     eye_dist = abs(kps[0].x - kps[1].x)
-
-    # Distância pequena = rosto de perfil = lateral/prone
-    is_prone = eye_dist < EYE_DIST_THRESHOLD
-    return is_prone, eye_dist
+    print(eye_dist)
+    return eye_dist
 
 
 model = YOLO("best copy.pt")
@@ -79,6 +77,34 @@ BABY_CLASS_ID = None
 # Contador para confirmar posição prona por N frames consecutivos
 prone_frame_counter = 0
 confirmed_prone = False
+
+def prone_detection():
+    x1, y1, x2, y2 = map(int, bbox)
+
+    # Bbox vermelho
+    cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
+
+    # Texto de alerta com fundo vermelho
+    text = "Posição Prona"
+    font_scale = max(0.6, (x2 - x1) / 300.0)
+    thickness = max(2, int(font_scale * 2))
+    (tw, th), baseline = cv2.getTextSize(
+        text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness
+    )
+    cv2.rectangle(
+        annotated_frame,
+        (x1, max(0, y1 - th - baseline - 10)),
+        (x1 + tw, max(0, y1)),
+        (0, 0, 255), -1
+    )
+    cv2.putText(
+        annotated_frame, text,
+        (x1, max(0, y1 - 5)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        font_scale, (255, 255, 255), thickness
+    )
+
+    # TODO: Adicionar um contador de segundos, se continuar em posição prona por mais de 6 segundos um alerta é lançado
 
 while True:
     ret, frame = video.read()
@@ -110,46 +136,15 @@ while True:
                 bbox = box.xyxy[0].cpu().numpy()
 
                 # Verificar posição prona
-                is_prone, eye_dist = check_prone(frame, bbox)
-
-                # Atualizar contador de confirmação
-                if is_prone:
-                    prone_frame_counter = min(prone_frame_counter + 1, PRONE_CONFIRM_FRAMES)
-                else:
-                    prone_frame_counter = max(prone_frame_counter - 1, 0)
-
-                confirmed_prone = prone_frame_counter < PRONE_CONFIRM_FRAMES
-
-                # Debug: mostrar eye_dist no canto da tela
-                debug_text = f"eye_dist: {eye_dist:.3f}" if eye_dist is not None else "eye_dist: N/A"
-                cv2.putText(annotated_frame, debug_text, (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 0), 2)
+                eye_dist = check_prone(frame, bbox)
+                print(eye_dist)
+                
+                # Se eye_dist for None, significa que o media pipe não detectou o rosto
+                # seguindo a lógica do usuário: não detectou = posição prona
+                confirmed_prone = eye_dist is None
 
                 if confirmed_prone:
-                    x1, y1, x2, y2 = map(int, bbox)
-
-                    # Bbox vermelho
-                    cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
-
-                    # Texto de alerta com fundo vermelho
-                    text = "[!] PRONE ALERT"
-                    font_scale = max(0.6, (x2 - x1) / 300.0)
-                    thickness = max(2, int(font_scale * 2))
-                    (tw, th), baseline = cv2.getTextSize(
-                        text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness
-                    )
-                    cv2.rectangle(
-                        annotated_frame,
-                        (x1, max(0, y1 - th - baseline - 10)),
-                        (x1 + tw, max(0, y1)),
-                        (0, 0, 255), -1
-                    )
-                    cv2.putText(
-                        annotated_frame, text,
-                        (x1, max(0, y1 - 5)),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        font_scale, (255, 255, 255), thickness
-                    )
+                    prone_detection()
 
     # Se bebê sumiu do frame, resetar contador
     if not baby_detected:
