@@ -2,6 +2,7 @@ from ultralytics import YOLO
 import cv2
 import mediapipe as mp
 import warnings
+import time
 warnings.filterwarnings("ignore")
 
 # --- PARÂMETROS AJUSTÁVEIS ---
@@ -65,7 +66,7 @@ def check_prone(frame, bbox):
     return eye_dist
 
 
-model = YOLO("best copy.pt")
+model = YOLO("best_12_5_26.pt")
 video = cv2.VideoCapture("baby7.mp4")
 
 # Janela redimensionável
@@ -74,18 +75,48 @@ cv2.resizeWindow("Detection Window", 800, 600)
 
 BABY_CLASS_ID = None
 
-# Contador para confirmar posição prona por N frames consecutivos
-prone_frame_counter = 0
-confirmed_prone = False
+class ProneTimer:
+    def __init__(self, alert_threshold=4.0):
+        self.alert_threshold = alert_threshold
+        self.start_time = None
 
-def prone_detection():
+    def update(self, is_prone):
+        """
+        Atualiza o estado do temporizador de forma isolada (Single Responsibility).
+        Retorna (alerta_ativo, tempo_decorrido).
+        """
+        if is_prone:
+            if self.start_time is None:
+                self.start_time = time.time()
+            elapsed = time.time() - self.start_time
+            return elapsed >= self.alert_threshold, elapsed
+        else:
+            self.reset()
+            return False, 0.0
+
+    def reset(self):
+        """Reseta o temporizador caso a posição prona falhe ou o bebê não esteja detectado."""
+        self.start_time = None
+
+prone_timer = ProneTimer(alert_threshold=1.0)
+
+def draw_prone_alert(annotated_frame, bbox, elapsed_time, alert_active):
+    """
+    Desenha a interface visual de detecção e alerta no frame.
+    Garante que a renderização fique separada da lógica temporal.
+    """
     x1, y1, x2, y2 = map(int, bbox)
 
-    # Bbox vermelho
-    cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
+    # Cor baseada no alerta: Vermelho para alerta (> 4s), Laranja apenas detectando
+    box_color = (0, 0, 255) if alert_active else (0, 165, 255)
 
-    # Texto de alerta com fundo vermelho
-    text = "Posição Prona"
+    cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), box_color, 3)
+
+    if alert_active:
+        text = f"ALERTA: Posicao Prona ({int(elapsed_time)}s)"
+    else:
+        text = f"Detectando Prona: {int(elapsed_time)}s"
+
     font_scale = max(0.6, (x2 - x1) / 300.0)
     thickness = max(2, int(font_scale * 2))
     (tw, th), baseline = cv2.getTextSize(
@@ -95,7 +126,7 @@ def prone_detection():
         annotated_frame,
         (x1, max(0, y1 - th - baseline - 10)),
         (x1 + tw, max(0, y1)),
-        (0, 0, 255), -1
+        box_color, -1
     )
     cv2.putText(
         annotated_frame, text,
@@ -103,8 +134,6 @@ def prone_detection():
         cv2.FONT_HERSHEY_SIMPLEX,
         font_scale, (255, 255, 255), thickness
     )
-
-    # TODO: Adicionar um contador de segundos, se continuar em posição prona por mais de 6 segundos um alerta é lançado
 
 while True:
     ret, frame = video.read()
@@ -141,15 +170,17 @@ while True:
                 
                 # Se eye_dist for None, significa que o media pipe não detectou o rosto
                 # seguindo a lógica do usuário: não detectou = posição prona
-                confirmed_prone = eye_dist is None
+                is_prone = eye_dist is None
+                
+                # Atualiza o temporizador isolado
+                alert_active, elapsed_time = prone_timer.update(is_prone)
 
-                if confirmed_prone:
-                    prone_detection()
+                if is_prone:
+                    draw_prone_alert(annotated_frame, bbox, elapsed_time, alert_active)
 
     # Se bebê sumiu do frame, resetar contador
     if not baby_detected:
-        prone_frame_counter = 0
-        confirmed_prone = False
+        prone_timer.reset()
 
     cv2.imshow("Detection Window", annotated_frame)
 
