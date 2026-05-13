@@ -1,6 +1,7 @@
 from ultralytics import YOLO
 import cv2
 import mediapipe as mp
+import numpy as np
 import warnings
 import time
 warnings.filterwarnings("ignore")
@@ -9,14 +10,135 @@ warnings.filterwarnings("ignore")
 # Confiança mínima para o MediaPipe detectar um rosto
 FACE_DETECTION_CONFIDENCE = 0.4
 
+# Parâmetros para detecção tradicional de brinquedos
+TOY_MIN_AREA = 600
+TOY_MAX_AREA = 25000
+TOY_CONF_TRADITIONAL = 0.0  # Mantido para consistência
+TOY_CONFIRM_FRAMES = 5      # Número de frames para confirmar um brinquedo
+TOY_IOU_THRESHOLD = 0.3     # Sobreposição mínima para considerar o mesmo objeto
+
 # -----------------------------
 
 # Número de frames consecutivos para confirmar posição prona (evita falsos positivos)
 PRONE_CONFIRM_FRAMES = 20
 # -----------------------------
 
+class ToyTracker:
+    """
+    Rastreia candidatos a brinquedos através de múltiplos frames para reduzir falsos positivos.
+    """
+    def __init__(self):
+        # Lista de candidatos: [{'bbox': (x, y, w, h), 'count': frames}]
+        self.candidates = []
+
+    def _calculate_iou(self, boxA, boxB):
+        # box = (x, y, w, h)
+        xA = max(boxA[0], boxB[0])
+        yA = max(boxA[1], boxB[1])
+        xB = min(boxA[0] + boxA[2], boxB[0] + boxB[2])
+        yB = min(boxA[1] + boxA[3], boxB[1] + boxB[3])
+
+        interWidth = max(0, xB - xA)
+        interHeight = max(0, yB - yA)
+        interArea = interWidth * interHeight
+
+        areaA = boxA[2] * boxA[3]
+        areaB = boxB[2] * boxB[3]
+        iou = interArea / float(areaA + areaB - interArea + 1e-6)
+        return iou
+
+    def update(self, current_detections):
+        """
+        Atualiza o estado dos candidatos com as novas detecções do frame.
+        current_detections: Lista de bboxes globais (x, y, w, h)
+        """
+        new_candidates = []
+
+        for det in current_detections:
+            best_iou = 0
+            best_idx = -1
+
+            for i, cand in enumerate(self.candidates):
+                iou = self._calculate_iou(det, cand['bbox'])
+                if iou > best_iou:
+                    best_iou = iou
+                    best_idx = i
+
+            if best_iou >= TOY_IOU_THRESHOLD:
+                # Atualiza candidato existente
+                self.candidates[best_idx]['count'] += 1
+                self.candidates[best_idx]['bbox'] = det # Atualiza posição
+                # Evita que o mesmo candidato seja usado por duas detecções no mesmo frame
+                self.candidates[best_idx]['matched'] = True
+            else:
+                # Novo candidato
+                new_candidates.append({'bbox': det, 'count': 1, 'matched': False})
+
+        # Marcar quem não foi matchado neste frame
+        for cand in self.candidates:
+            if 'matched' not in cand: cand['matched'] = False # Init
+            if not cand['matched']:
+                cand['count'] -= 1 # Penaliza se sumiu
+            else:
+                cand['matched'] = False # Reset para o próximo frame
+
+        # Filtrar candidatos que morreram (count <= 0) e mesclar novos
+        self.candidates = [c for c in self.candidates if c['count'] > 0]
+        self.candidates.extend(new_candidates)
+
+    def get_confirmed_toys(self):
+        """Retorna apenas brinquedos que passaram do threshold de frames."""
+        return [c['bbox'] for c in self.candidates if c['count'] >= TOY_CONFIRM_FRAMES]
+
 # Inicializa o detector de rostos do MediaPipe
 mp_face_detection = mp.solutions.face_detection
+
+def detect_toys_traditional(roi_berco):
+    """
+    Detecta objetos coloridos (brinquedos) dentro da ROI do berço usando Visão Computacional Tradicional.
+
+    Abordagem:
+    1. Converte para HSV para melhor segmentação de cores.
+    2. Cria máscaras para cores saturadas (evitando tons neutros, pretos e brancos).
+    3. Aplica filtros morfológicos para limpar ruídos.
+    4. Encontra contornos e filtra por área e proporção (aspect ratio).
+
+    Retorna: Lista de bounding boxes (x, y, w, h) relativas à ROI.
+    """
+    if roi_berco is None or roi_berco.size == 0:
+        return []
+
+    # 1. Conversão para HSV
+    hsv = cv2.cvtColor(roi_berco, cv2.COLOR_BGR2HSV)
+
+    # 2. Máscara de Saturação: Brinquedos tendem a ser cores vivas.
+    # Aumentamos os limites para reduzir falsos positivos de sombras e dobras de roupa.
+    # S > 70 e V > 70 para ignorar cores pálidas e áreas escuras.
+    lower_saturated = np.array([0, 110, 110])
+    upper_saturated = np.array([180, 200, 200])
+    mask = cv2.inRange(hsv, lower_saturated, upper_saturated)
+
+    # 3. Filtros Morfológicos
+    kernel = np.ones((5, 5), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)  # Remove pequenos ruídos
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel) # Preenche buracos
+
+    # 4. Detecção de Contornos
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    toys_bboxes = []
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if TOY_MIN_AREA < area < TOY_MAX_AREA:
+            x, y, w, h = cv2.boundingRect(cnt)
+
+            # Filtro de Aspect Ratio: Evita detectar grades do berço (muito finas/longas)
+            aspect_ratio = float(w) / h
+            if 0.2 < aspect_ratio < 5.0:
+                toys_bboxes.append((x, y, w, h))
+
+    return toys_bboxes
+
 face_detector = mp_face_detection.FaceDetection(
     min_detection_confidence=FACE_DETECTION_CONFIDENCE,
     model_selection=1  # modelo para objetos distantes (melhor para top-down)
@@ -67,7 +189,7 @@ def check_prone(frame, bbox):
 
 
 model = YOLO("best_12_5_26.pt")
-video = cv2.VideoCapture("baby7.mp4")
+video = cv2.VideoCapture("baby8.mp4")
 
 # Janela redimensionável
 cv2.namedWindow("Detection Window", cv2.WINDOW_NORMAL)
@@ -121,8 +243,10 @@ class AbsenceTimer:
         """Reseta o temporizador caso o bebê seja detectado."""
         self.start_time = None
 
+# Instancia os temporizadores e rastreadores
 prone_timer = ProneTimer(alert_threshold=1.0)
 absence_timer = AbsenceTimer(alert_threshold=5.0)
+toy_tracker = ToyTracker()
 
 def draw_absence_alert(annotated_frame, elapsed_time, alert_active):
     """
@@ -211,7 +335,7 @@ while True:
         if BABY_CLASS_ID is None:
             BABY_CLASS_ID = 0
 
-    # Iterar sobre as detecções para aplicar a lógica de posição prona
+    # Iterar sobre as detecções para aplicar a lógica de posição prona e detecção de brinquedos
     baby_detected = False
     if hasattr(results[0], 'boxes') and results[0].boxes is not None:
         for box in results[0].boxes:
@@ -236,6 +360,35 @@ while True:
 
                 if is_prone:
                     draw_prone_alert(annotated_frame, bbox, elapsed_time, alert_active)
+
+            elif name == "crib":
+                # Recortar a ROI do berço
+                cx1, cy1, cx2, cy2 = map(int, bbox)
+                roi_berco = frame[max(0, cy1):cy2, max(0, cx1):cx2]
+
+                # Detecção tradicional de brinquedos dentro do berço
+                toys_relative = detect_toys_traditional(roi_berco)
+
+                # Converter coordenadas relativas da ROI para coordenadas globais do frame
+                toys_global = []
+                for (tx, ty, tw, th) in toys_relative:
+                    global_x = max(0, cx1) + tx
+                    global_y = max(0, cy1) + ty
+                    toys_global.append((global_x, global_y, tw, th))
+
+                # Atualizar o rastreador temporal com as detecções globais
+                toy_tracker.update(toys_global)
+
+                # Desenhar apenas os brinquedos confirmados temporalmente
+                confirmed_toys = toy_tracker.get_confirmed_toys()
+                for (gx, gy, gw, gh) in confirmed_toys:
+                    # Desenhar bounding box (Cor Ciano: (255, 255, 0))
+                    cv2.rectangle(annotated_frame, (gx, gy),
+                                  (gx + gw, gy + gh), (255, 255, 0), 2)
+
+                    # Label "Toy-Trad"
+                    cv2.putText(annotated_frame, "Toy-Trad", (gx, max(30, gy)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
 
     # Se bebê sumiu do frame, resetar contador
     if not baby_detected:
