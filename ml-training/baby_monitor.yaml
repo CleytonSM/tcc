@@ -3,8 +3,8 @@ train: ml-training/dataset/baby_monitor/train
 val: ml-training/dataset/baby_monitor/valid
 test: ml-training/dataset/baby_monitor/test
 
-nc: 3
-names: ['baby', 'crib', 'toy']
+nc: 2
+names: ['baby', 'crib']
 
 roboflow:
   workspace: cleytons-workspace

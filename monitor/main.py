@@ -98,7 +98,63 @@ class ProneTimer:
         """Reseta o temporizador caso a posição prona falhe ou o bebê não esteja detectado."""
         self.start_time = None
 
+class AbsenceTimer:
+    def __init__(self, alert_threshold=5.0):
+        self.alert_threshold = alert_threshold
+        self.start_time = None
+
+    def update(self, is_absent):
+        """
+        Atualiza o estado do temporizador de ausência (Single Responsibility).
+        Retorna (alerta_ativo, tempo_decorrido).
+        """
+        if is_absent:
+            if self.start_time is None:
+                self.start_time = time.time()
+            elapsed = time.time() - self.start_time
+            return elapsed >= self.alert_threshold, elapsed
+        else:
+            self.reset()
+            return False, 0.0
+
+    def reset(self):
+        """Reseta o temporizador caso o bebê seja detectado."""
+        self.start_time = None
+
 prone_timer = ProneTimer(alert_threshold=1.0)
+absence_timer = AbsenceTimer(alert_threshold=5.0)
+
+def draw_absence_alert(annotated_frame, elapsed_time, alert_active):
+    """
+    Desenha a interface visual de alerta de ausência no frame.
+    """
+    if not alert_active:
+        return
+        
+    text = f"ALERTA CRITICO: Bebe nao detectado ({int(elapsed_time)}s)"
+    font_scale = 1.0
+    thickness = 3
+    (tw, th), baseline = cv2.getTextSize(
+        text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness
+    )
+    
+    h_frame, w_frame = annotated_frame.shape[:2]
+    x1 = (w_frame - tw) // 2
+    y1 = max(th + 10, int(h_frame * 0.1))
+
+    # Fundo vermelho
+    cv2.rectangle(
+        annotated_frame,
+        (x1 - 10, y1 - th - 10),
+        (x1 + tw + 10, y1 + baseline + 5),
+        (0, 0, 255), -1
+    )
+    cv2.putText(
+        annotated_frame, text,
+        (x1, y1),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        font_scale, (255, 255, 255), thickness
+    )
 
 def draw_prone_alert(annotated_frame, bbox, elapsed_time, alert_active):
     """
@@ -160,18 +216,21 @@ while True:
     if hasattr(results[0], 'boxes') and results[0].boxes is not None:
         for box in results[0].boxes:
             cls_id = int(box.cls[0])
-            if cls_id == BABY_CLASS_ID:
+            bbox = box.xyxy[0].cpu().numpy()
+            name = results[0].names[cls_id]
+
+            if name == "baby":
                 baby_detected = True
-                bbox = box.xyxy[0].cpu().numpy()
+                baby_bbox = bbox
 
                 # Verificar posição prona
                 eye_dist = check_prone(frame, bbox)
                 print(eye_dist)
-                
+
                 # Se eye_dist for None, significa que o media pipe não detectou o rosto
                 # seguindo a lógica do usuário: não detectou = posição prona
                 is_prone = eye_dist is None
-                
+
                 # Atualiza o temporizador isolado
                 alert_active, elapsed_time = prone_timer.update(is_prone)
 
