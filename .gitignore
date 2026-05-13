@@ -2,3 +2,4 @@
 .idea
 *labels.cache
 labels.cache
+*__pycache__
