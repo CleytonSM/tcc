@@ -1,0 +1,20 @@
+from ultralytics import YOLO
+
+def main():
+    # Load model
+    model = YOLO("yolov8n.pt")
+
+    model.train(
+        data="ml-training/dataset/toy_detector/data.yaml",
+        epochs=100,
+        imgsz=640,
+        patience=50,
+        batch=16
+    )
+ 
+    metrics = model.val()
+    test_metrics = model.val(split="test")
+
+    
+if __name__ == "__main__":
+    main()

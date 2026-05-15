@@ -5,7 +5,7 @@ def main():
     model = YOLO("yolov8n.pt")
 
     model.train(
-        data="ml-training/baby_monitor.yaml",
+        data="ml-training/dataset/baby_monitor/data.yaml",
         epochs=100,
         imgsz=640,
         patience=50,
@@ -15,5 +15,6 @@ def main():
     metrics = model.val()
     test_metrics = model.val(split="test")
 
+    
 if __name__ == "__main__":
     main()

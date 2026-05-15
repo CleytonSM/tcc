@@ -7,7 +7,7 @@ warnings.filterwarnings("ignore")
 
 import config
 from toy_tracker import ToyTracker
-from toy_detection import detect_toys_traditional
+from toy_detection import ToyDetector
 from prone_detector import check_prone, cleanup
 from prone_timer import ProneTimer
 from absence_timer import AbsenceTimer
@@ -22,7 +22,7 @@ def find_baby_class_id(results):
     return 0
 
 
-def process_frame(frame, model, baby_class_id, prone_timer, absence_timer, toy_tracker):
+def process_frame(frame, model, baby_class_id, prone_timer, absence_timer, toy_detector, toy_tracker):
     """Processa um frame e retorna o frame anotado com alertas."""
     results = model(frame, verbose=False)
     annotated_frame = results[0].plot()
@@ -30,6 +30,10 @@ def process_frame(frame, model, baby_class_id, prone_timer, absence_timer, toy_t
     baby_detected = False
 
     if hasattr(results[0], 'boxes') and results[0].boxes is not None:
+        # Primeiro loop: coleta bboxes do bebe e berco
+        baby_bbox_global = None
+        crib_bbox_global = None
+
         for box in results[0].boxes:
             cls_id = int(box.cls[0])
             bbox = box.xyxy[0].cpu().numpy()
@@ -37,6 +41,7 @@ def process_frame(frame, model, baby_class_id, prone_timer, absence_timer, toy_t
 
             if name == "baby":
                 baby_detected = True
+                baby_bbox_global = bbox
                 eye_dist = check_prone(frame, bbox)
                 is_prone = eye_dist is None
 
@@ -46,22 +51,32 @@ def process_frame(frame, model, baby_class_id, prone_timer, absence_timer, toy_t
                     draw_prone_alert(annotated_frame, bbox, elapsed_time, alert_active)
 
             elif name == "crib":
-                cx1, cy1, cx2, cy2 = map(int, bbox)
-                roi_berco = frame[max(0, cy1):cy2, max(0, cx1):cx2]
+                crib_bbox_global = bbox
 
-                toys_relative = detect_toys_traditional(roi_berco)
+        # Segundo loop: processa berco com contexto do bebe
+        if crib_bbox_global is not None:
+            cx1, cy1, cx2, cy2 = map(int, crib_bbox_global)
+            roi_berco = frame[max(0, cy1):cy2, max(0, cx1):cx2]
 
-                toys_global = []
-                for (tx, ty, tw, th) in toys_relative:
-                    toys_global.append((max(0, cx1) + tx, max(0, cy1) + ty, tw, th))
+            # Converte bbox do bebe para coordenadas relativas ao berco
+            baby_roi_bbox = None
+            if baby_bbox_global is not None:
+                bx, by, bw, bh = map(int, baby_bbox_global)
+                baby_roi_bbox = (bx - cx1, by - cy1, bw, bh)
 
-                toy_tracker.update(toys_global)
+            toys_relative = toy_detector.detect(roi_berco, baby_roi_bbox)
 
-                for (gx, gy, gw, gh) in toy_tracker.get_confirmed_toys():
-                    cv2.rectangle(annotated_frame, (gx, gy),
-                                  (gx + gw, gy + gh), (255, 255, 0), 2)
-                    cv2.putText(annotated_frame, "Toy-Trad", (gx, max(30, gy)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
+            toys_global = []
+            for (tx, ty, tw, th) in toys_relative:
+                toys_global.append((max(0, cx1) + tx, max(0, cy1) + ty, tw, th))
+
+            toy_tracker.update(toys_global, frame)
+
+            for (gx, gy, gw, gh) in toy_tracker.get_confirmed_toys():
+                cv2.rectangle(annotated_frame, (gx, gy),
+                              (gx + gw, gy + gh), (255, 255, 0), 2)
+                cv2.putText(annotated_frame, "Toy-Trad", (gx, max(30, gy)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
 
     if not baby_detected:
         prone_timer.reset()
@@ -80,6 +95,7 @@ def run():
     baby_class_id = None
     prone_timer = ProneTimer()
     absence_timer = AbsenceTimer()
+    toy_detector = ToyDetector()
     toy_tracker = ToyTracker()
 
     while True:
@@ -92,7 +108,7 @@ def run():
             baby_class_id = find_baby_class_id(results)
 
         annotated_frame, baby_detected = process_frame(
-            frame, model, baby_class_id, prone_timer, absence_timer, toy_tracker
+            frame, model, baby_class_id, prone_timer, absence_timer, toy_detector, toy_tracker
         )
 
         cv2.imshow(config.WINDOW_NAME, annotated_frame)
