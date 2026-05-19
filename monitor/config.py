@@ -29,10 +29,12 @@ PRONE_CONFIRM_FRAMES = 20
 
 # Temporizadores de alerta
 PRONE_ALERT_THRESHOLD = 1.0  # segundos
+TOY_ALERT_THRESHOLD = 5.0  # segundos
 ABSENCE_ALERT_THRESHOLD = 5.0  # segundos
 
 # Video
-MODEL_PATH = "best_12_5_26.pt"
+BABY_MODEL_PATH = "best_baby_15_05_26.pt"
+TOY_MODEL_PATH = "best_toy_18_05_26.pt"
 VIDEO_PATH = "baby8.mp4"
 
 # Janela

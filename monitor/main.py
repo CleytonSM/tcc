@@ -6,12 +6,11 @@ import warnings
 warnings.filterwarnings("ignore")
 
 import config
-from toy_tracker import ToyTracker
-from toy_detection import ToyDetector
 from prone_detector import check_prone, cleanup
 from prone_timer import ProneTimer
 from absence_timer import AbsenceTimer
-from drawing import draw_prone_alert, draw_absence_alert
+from toy_alert_timer import ToyAlertTimer
+from drawing import draw_prone_alert, draw_absence_alert, draw_toy_alert
 
 
 def find_baby_class_id(results):
@@ -22,22 +21,22 @@ def find_baby_class_id(results):
     return 0
 
 
-def process_frame(frame, model, baby_class_id, prone_timer, absence_timer, toy_detector, toy_tracker):
+def process_frame(frame, model_baby, model_toy, baby_class_id, prone_timer, absence_timer, toy_timer):
     """Processa um frame e retorna o frame anotado com alertas."""
-    results = model(frame, verbose=False)
-    annotated_frame = results[0].plot()
+    results_baby = model_baby(frame, verbose=False)
+    annotated_frame = results_baby[0].plot()
 
     baby_detected = False
 
-    if hasattr(results[0], 'boxes') and results[0].boxes is not None:
+    if hasattr(results_baby[0], 'boxes') and results_baby[0].boxes is not None:
         # Primeiro loop: coleta bboxes do bebe e berco
         baby_bbox_global = None
         crib_bbox_global = None
 
-        for box in results[0].boxes:
+        for box in results_baby[0].boxes:
             cls_id = int(box.cls[0])
             bbox = box.xyxy[0].cpu().numpy()
-            name = results[0].names[cls_id]
+            name = results_baby[0].names[cls_id]
 
             if name == "baby":
                 baby_detected = True
@@ -56,7 +55,6 @@ def process_frame(frame, model, baby_class_id, prone_timer, absence_timer, toy_d
         # Segundo loop: processa berco com contexto do bebe
         if crib_bbox_global is not None:
             cx1, cy1, cx2, cy2 = map(int, crib_bbox_global)
-            roi_berco = frame[max(0, cy1):cy2, max(0, cx1):cx2]
 
             # Converte bbox do bebe para coordenadas relativas ao berco
             baby_roi_bbox = None
@@ -64,20 +62,24 @@ def process_frame(frame, model, baby_class_id, prone_timer, absence_timer, toy_d
                 bx, by, bw, bh = map(int, baby_bbox_global)
                 baby_roi_bbox = (bx - cx1, by - cy1, bw, bh)
 
-            toys_relative = toy_detector.detect(roi_berco, baby_roi_bbox)
+            results_toy = model_toy(frame, verbose=False)
+        toys = []
+        for r in results_toy:
+            if r.boxes is not None:
+                for box in r.boxes:
+                    x1, y1, x2, y2 = box.xyxy.cpu().numpy()[0]
+                    toys.append((int(x1), int(y1), int(x2 - x1), int(y2 - y1)))
+                    
 
-            toys_global = []
-            for (tx, ty, tw, th) in toys_relative:
-                toys_global.append((max(0, cx1) + tx, max(0, cy1) + ty, tw, th))
+        # Desenha as bounding boxes dos brinquedos
+        for (tx, ty, tw, th) in toys:
+            cv2.rectangle(annotated_frame, (tx, ty), (tx + tw, ty + th), (0, 255, 0), 2)
 
-            toy_tracker.update(toys_global, frame)
-
-            for (gx, gy, gw, gh) in toy_tracker.get_confirmed_toys():
-                cv2.rectangle(annotated_frame, (gx, gy),
-                              (gx + gw, gy + gh), (255, 255, 0), 2)
-                cv2.putText(annotated_frame, "Toy-Trad", (gx, max(30, gy)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
-
+        # Atualiza timer de brinquedo
+        toy_detected = len(toys) > 0
+        toy_alert_active, toy_elapsed = toy_timer.update(toy_detected)
+        if toy_alert_active:
+            draw_toy_alert(annotated_frame, toy_elapsed, True)
     if not baby_detected:
         prone_timer.reset()
 
@@ -86,7 +88,8 @@ def process_frame(frame, model, baby_class_id, prone_timer, absence_timer, toy_d
 
 def run():
     """Entrada principal do sistema de monitoramento."""
-    model = YOLO(config.MODEL_PATH)
+    model_baby = YOLO(config.BABY_MODEL_PATH)
+    model_toy = YOLO(config.TOY_MODEL_PATH)
     video = cv2.VideoCapture(config.VIDEO_PATH)
 
     cv2.namedWindow(config.WINDOW_NAME, cv2.WINDOW_NORMAL)
@@ -95,20 +98,18 @@ def run():
     baby_class_id = None
     prone_timer = ProneTimer()
     absence_timer = AbsenceTimer()
-    toy_detector = ToyDetector()
-    toy_tracker = ToyTracker()
-
+    toy_timer = ToyAlertTimer(alert_threshold=config.TOY_ALERT_THRESHOLD)
     while True:
         ret, frame = video.read()
         if not ret:
             break
 
         if baby_class_id is None:
-            results = model(frame, verbose=False)
+            results = model_baby(frame, verbose=False)
             baby_class_id = find_baby_class_id(results)
 
         annotated_frame, baby_detected = process_frame(
-            frame, model, baby_class_id, prone_timer, absence_timer, toy_detector, toy_tracker
+            frame, model_baby, model_toy, baby_class_id, prone_timer, absence_timer, toy_timer
         )
 
         cv2.imshow(config.WINDOW_NAME, annotated_frame)
