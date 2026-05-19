@@ -11,6 +11,11 @@ from prone_timer import ProneTimer
 from absence_timer import AbsenceTimer
 from toy_alert_timer import ToyAlertTimer
 from drawing import draw_prone_alert, draw_absence_alert, draw_toy_alert
+from alert_repository import AlertRepository
+from alert_service import AlertService
+from datetime import datetime
+import os
+import psycopg2
 
 
 def find_baby_class_id(results):
@@ -21,7 +26,7 @@ def find_baby_class_id(results):
     return 0
 
 
-def process_frame(frame, model_baby, model_toy, baby_class_id, prone_timer, absence_timer, toy_timer):
+def process_frame(frame, model_baby, model_toy, baby_class_id, prone_timer, absence_timer, toy_timer, alert_service):
     """Processa um frame e retorna o frame anotado com alertas."""
     results_baby = model_baby(frame, verbose=False)
     annotated_frame = results_baby[0].plot()
@@ -48,6 +53,8 @@ def process_frame(frame, model_baby, model_toy, baby_class_id, prone_timer, abse
 
                 if is_prone:
                     draw_prone_alert(annotated_frame, bbox, elapsed_time, alert_active)
+                    if alert_active:
+                        alert_service.record("PRONE", datetime.now(), datetime.now(), int(elapsed_time))
 
             elif name == "crib":
                 crib_bbox_global = bbox
@@ -69,7 +76,7 @@ def process_frame(frame, model_baby, model_toy, baby_class_id, prone_timer, abse
                 for box in r.boxes:
                     x1, y1, x2, y2 = box.xyxy.cpu().numpy()[0]
                     toys.append((int(x1), int(y1), int(x2 - x1), int(y2 - y1)))
-                    
+
 
         # Desenha as bounding boxes dos brinquedos
         for (tx, ty, tw, th) in toys:
@@ -80,8 +87,17 @@ def process_frame(frame, model_baby, model_toy, baby_class_id, prone_timer, abse
         toy_alert_active, toy_elapsed = toy_timer.update(toy_detected)
         if toy_alert_active:
             draw_toy_alert(annotated_frame, toy_elapsed, True)
-    if not baby_detected:
-        prone_timer.reset()
+            alert_service.record("TOY", datetime.now(), datetime.now(), int(toy_elapsed))
+
+        # Atualiza timer de ausencia
+        if not baby_detected:
+            absence_timer.update(True)
+            if absence_timer.start_time is not None:
+                elapsed = absence_timer.elapsed()
+                if elapsed >= absence_timer.alert_threshold:
+                    alert_service.record("ABSENCE", datetime.now(), datetime.now(), int(elapsed))
+        else:
+            absence_timer.reset()
 
     return annotated_frame, baby_detected
 
@@ -95,10 +111,26 @@ def run():
     cv2.namedWindow(config.WINDOW_NAME, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(config.WINDOW_NAME, config.WINDOW_WIDTH, config.WINDOW_HEIGHT)
 
+    # Configurar conexao com PostgreSQL
+    db_conn = None
+    try:
+        db_conn = psycopg2.connect(
+            host=os.getenv("POSTGRES_HOST", "localhost"),
+            dbname=os.getenv("POSTGRES_DB", "monitor"),
+            user=os.getenv("POSTGRES_USER", "monitor"),
+            password=os.getenv("POSTGRES_PASSWORD", "monitor"),
+        )
+    except Exception:
+        # Se nao houver banco, desativa persistencia
+        pass
+
     baby_class_id = None
     prone_timer = ProneTimer()
     absence_timer = AbsenceTimer()
     toy_timer = ToyAlertTimer(alert_threshold=config.TOY_ALERT_THRESHOLD)
+    alert_repo = AlertRepository(db_conn)
+    alert_service = AlertService(alert_repo)
+
     while True:
         ret, frame = video.read()
         if not ret:
@@ -109,7 +141,7 @@ def run():
             baby_class_id = find_baby_class_id(results)
 
         annotated_frame, baby_detected = process_frame(
-            frame, model_baby, model_toy, baby_class_id, prone_timer, absence_timer, toy_timer
+            frame, model_baby, model_toy, baby_class_id, prone_timer, absence_timer, toy_timer, alert_service
         )
 
         cv2.imshow(config.WINDOW_NAME, annotated_frame)
@@ -120,6 +152,8 @@ def run():
     video.release()
     cv2.destroyAllWindows()
     cleanup()
+    if db_conn:
+        db_conn.close()
 
 
 if __name__ == "__main__":
