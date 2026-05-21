@@ -33,9 +33,9 @@ TOY_ALERT_THRESHOLD = 5.0  # segundos
 ABSENCE_ALERT_THRESHOLD = 5.0  # segundos
 
 # Video
-BABY_MODEL_PATH = "best_baby_15_05_26.pt"
-TOY_MODEL_PATH = "best_toy_18_05_26.pt"
-VIDEO_PATH = "baby8.mp4"
+BABY_MODEL_PATH = "models/best_baby_15_05_26.pt"
+TOY_MODEL_PATH = "models/best_toy_18_05_26.pt"
+VIDEO_PATH = "test_videos/nobaby.mp4"
 
 # Janela
 WINDOW_NAME = "Detection Window"

@@ -11,7 +11,7 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./alert_model.sql:/docker-entrypoint-initdb.d/01_init.sql
+      - ./migrations/alert_model.sql:/docker-entrypoint-initdb.d/01_init.sql
 
 volumes:
   pgdata:
